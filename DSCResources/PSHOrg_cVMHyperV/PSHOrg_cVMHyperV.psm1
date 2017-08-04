@@ -105,6 +105,7 @@ function Set-TargetResource
 		[ValidateSet("Present","Absent")]
 		[String]$Ensure = "Present"
 	)
+    $DynamicMemory = -not (($MinimumMemory -eq $StartupMemory) -and ($MaximumMemory -eq $StartupMemory))
 
     # Check if Hyper-V module is present for Hyper-V cmdlets
     if(!(Get-Module -ListAvailable -Name Hyper-V))
@@ -149,7 +150,7 @@ function Set-TargetResource
             }
             
             # If the VM does not have the right minimum or maximum memory, stop the VM, set the right memory, start the VM
-            if($MinimumMemory -or $MaximumMemory)
+            if(($MinimumMemory -or $MaximumMemory) -and $DynamicMemory)
             {
                 $changeProperty["DynamicMemory"]=$true
 
@@ -163,6 +164,12 @@ function Set-TargetResource
                     Write-Verbose -Message "VM $Name does not have correct maximum memory. Expected $MaximumMemory, actual $($vmObj.MemoryMaximum)"
                     $changeProperty["MemoryMaximum"]=$MaximumMemory
                 }
+            } else {
+                if($vmObj.DynamicMemoryEnabled -ne $DynamicMemory)
+                {
+                    Write-Verbose -Message "VM $Name does have dynamic memory enabled. Expected $DynamicMemory, actual $($vmObj.DynamicMemoryEnabled)"
+                    $changeProperty["StaticMemory"]=$true
+                }                
             }
 
             # If the VM does not have the right processor count, stop the VM, set the right memory, start the VM
@@ -206,11 +213,13 @@ function Set-TargetResource
 
             $parameters = @{}
             $parameters["Name"] = $Name
-            if($MinimumMemory -or $MaximumMemory)
+            if(($MinimumMemory -or $MaximumMemory) -and $DynamicMemory)
             {
                 $parameters["DynamicMemory"]=$true
                 if($MinimumMemory){$parameters["MemoryMinimumBytes"]=$MinimumMemory}
                 if($MaximumMemory){$parameters["MemoryMaximumBytes"]=$MaximumMemory}
+            } else {
+                $parameters["StaticMemory"]=$true
             }
             if($ProcessorCount){$parameters["ProcessorCount"]=$ProcessorCount}
             $null = Set-VM @parameters
@@ -282,6 +291,7 @@ function Test-TargetResource
 		[ValidateSet("Present","Absent")]
 		[String]$Ensure = "Present"
 	)
+    $DynamicMemory = -not (($MinimumMemory -eq $StartupMemory) -and ($MaximumMemory -eq $StartupMemory))
 
     #region input validation
     
@@ -294,7 +304,7 @@ function Test-TargetResource
     # Check if 1 or 0 VM with name = $name exist
     if((Get-VM -Name $Name -ErrorAction SilentlyContinue).count -gt 1)
     {
-       Throw "More than one VM with the name $Name exist." 
+        Throw "More than one VM with the name $Name exist." 
     }
     
     # Check if $VhdPath exist
@@ -304,7 +314,7 @@ function Test-TargetResource
     }
 
     # Check if Minimum memory is less than StartUpmemory
-    if($StartupMemory -and $MinimumMemory -and  ($MinimumMemory -gt $StartupMemory))
+    if($StartupMemory -and $MinimumMemory -and ($MinimumMemory -gt $StartupMemory))
     {
         Throw "MinimumMemory($MinimumMemory) should not be greater than StartupMemory($StartupMemory)"
     }
@@ -324,7 +334,7 @@ function Test-TargetResource
     # Check if the generation matches the VhdPath extenstion
     if($Generation -and ($VhdPath.Split('.')[-1] -ne $Generation))
     {
-        Throw "Generation $geneartion should match virtual disk extension $($VhdPath.Split('.')[-1])"
+        Throw "Generation $Generation should match virtual disk extension $($VhdPath.Split('.')[-1])"
     }
 
     # Check if $Path exist
@@ -349,8 +359,9 @@ function Test-TargetResource
             if($StartupMemory -and ($vmObj.MemoryStartup -ne $StartupMemory)){return $false}
             if($MACAddress -and ($vmObj.NetWorkAdapters.MacAddress -notcontains $MACAddress)){return $false}
             if($ProcessorCount -and ($vmObj.ProcessorCount -ne $ProcessorCount)){return $false}
-            if($MaximumMemory -and ($vmObj.MemoryMaximum -ne $MaximumMemory)){return $false}
-            if($MinimumMemory -and ($vmObj.MemoryMinimum -ne $MinimumMemory)){return $false}
+            if($vmObj.DynamicMemoryEnabled -and ($vmObj.MemoryMaximum -ne $MaximumMemory)){return $false}
+            if($vmObj.DynamicMemoryEnabled -and ($vmObj.MemoryMinimum -ne $MinimumMemory)){return $false}
+            if($vmObj.DynamicMemoryEnabled -ne $DynamicMemory){return $false}
 
             return $true
         }
